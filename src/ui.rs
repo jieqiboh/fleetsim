@@ -5,7 +5,9 @@ use crate::model::{
     task_position,
 };
 
+/// Spawns the overlay UI camera and a restart button.
 pub fn setup_restart_ui(mut commands: Commands) {
+    // Render UI after the 3D camera pass.
     commands.spawn((
         Camera2d,
         Camera {
@@ -17,6 +19,7 @@ pub fn setup_restart_ui(mut commands: Commands) {
 
     commands
         .spawn((
+            // Absolute-positioned container in the top-left corner.
             Node {
                 position_type: PositionType::Absolute,
                 top: px(12.0),
@@ -30,6 +33,7 @@ pub fn setup_restart_ui(mut commands: Commands) {
                 .spawn((
                     Button,
                     RestartButton,
+                    // Basic button sizing and label alignment.
                     Node {
                         min_width: px(170.0),
                         min_height: px(36.0),
@@ -43,6 +47,7 @@ pub fn setup_restart_ui(mut commands: Commands) {
                 ))
                 .with_children(|button| {
                     button.spawn((
+                        // Visible button label.
                         Text::new("Restart Simulation"),
                         TextFont {
                             font_size: 16.0,
@@ -54,6 +59,7 @@ pub fn setup_restart_ui(mut commands: Commands) {
         });
 }
 
+/// Handles restart button interaction and resets simulation state when pressed.
 pub fn restart_button_system(
     mut sim: ResMut<Simulation>,
     mut button_query: Query<
@@ -68,6 +74,7 @@ pub fn restart_button_system(
 ) {
     let mut should_restart = false;
 
+    // Update button colors by interaction state and detect click.
     for (interaction, mut color) in &mut button_query {
         match *interaction {
             Interaction::Pressed => {
@@ -87,9 +94,11 @@ pub fn restart_button_system(
         return;
     }
 
+    // Reset simulation timeline and clear pending events.
     sim.now = 0.0;
     sim.events.clear();
 
+    // Reset robots to initial position and clear assignments/path history.
     for (robot, mut transform, mut assignment, mut path) in &mut robots {
         let start = robot_start_position(robot.id);
         transform.translation = start;
@@ -98,6 +107,7 @@ pub fn restart_button_system(
         path.points.push(start);
     }
 
+    // Reset task state and deterministic positions.
     for (mut task, mut transform) in &mut tasks {
         task.assigned_to = None;
         task.completed = false;

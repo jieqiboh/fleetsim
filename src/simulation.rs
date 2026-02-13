@@ -5,22 +5,26 @@ use crate::model::{
     robot_start_position, task_position,
 };
 
+/// Spawns world content: light, ground, robots, and tasks.
 pub fn setup_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Directional light for simple scene illumination.
     commands.spawn((
         DirectionalLight::default(),
         Transform::from_xyz(5.0, 10.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
+    // Large scaled plane used as ground.
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default())),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.8, 0.8))),
         Transform::from_scale(Vec3::splat(20.0)),
     ));
 
+    // Spawn robots at deterministic start positions.
     for i in 0..NUM_ROBOTS {
         let start = robot_start_position(i);
         commands.spawn((
@@ -35,6 +39,7 @@ pub fn setup_world(
         ));
     }
 
+    // Spawn deterministic task markers.
     for task_id in 0..NUM_TASKS {
         let pos = task_position(task_id);
         commands.spawn((
@@ -50,14 +55,17 @@ pub fn setup_world(
     }
 }
 
+/// Advances simulation time and executes due events.
 pub fn run_simulation(
     time: Res<Time>,
     mut sim: ResMut<Simulation>,
     mut robots: Query<(&Robot, &mut Transform, &mut RobotAssignment, &mut RobotPath)>,
     mut tasks: Query<&mut Task>,
 ) {
+    // Advance simulation clock by frame delta.
     sim.now += time.delta_secs_f64();
 
+    // Process all events whose timestamp is now due.
     while let Some(event) = sim.events.peek() {
         if event.timestamp > sim.now {
             break;
@@ -70,6 +78,7 @@ pub fn run_simulation(
                 target,
                 task_id,
             } => {
+                // Move the targeted robot and update its path history.
                 for (robot, mut transform, mut assignment, mut path) in &mut robots {
                     if robot.id != robot_id {
                         continue;
@@ -84,6 +93,7 @@ pub fn run_simulation(
                     assignment.task_id = None;
                 }
 
+                // Mark the task as completed once the robot "arrives".
                 if let Some(task_id) = task_id {
                     for mut task in &mut tasks {
                         if task.id == task_id {
@@ -98,6 +108,7 @@ pub fn run_simulation(
     }
 }
 
+/// Assigns each idle robot the nearest available task and schedules travel events.
 pub fn allocate_tasks(
     mut sim: ResMut<Simulation>,
     mut robots: Query<(Entity, &Robot, &Transform, &mut RobotAssignment)>,
@@ -105,6 +116,7 @@ pub fn allocate_tasks(
 ) {
     let now = sim.now;
 
+    // Iterate idle robots and greedily allocate the nearest unassigned task.
     for (_, robot, transform, mut assignment) in &mut robots {
         if assignment.task_id.is_some() {
             continue;
@@ -140,6 +152,7 @@ pub fn allocate_tasks(
         }
 
         let travel_time = (best_dist_sq.sqrt() / 4.0).max(0.5) as f64;
+        // Queue a move event instead of teleporting immediately.
         sim.schedule(Event {
             timestamp: now + travel_time,
             event_type: EventType::MoveRobot {
@@ -151,6 +164,7 @@ pub fn allocate_tasks(
     }
 }
 
+/// Draws robot path trails using debug gizmo lines.
 pub fn draw_robot_paths(mut gizmos: Gizmos, query: Query<&RobotPath>) {
     for path in &query {
         if path.points.len() < 2 {

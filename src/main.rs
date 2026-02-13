@@ -1,11 +1,17 @@
 use bevy::prelude::*;
+
+// Camera controls and camera entity setup.
 mod camera;
+// Shared components/resources and helper functions.
 mod model;
+// World spawning and simulation systems.
 mod simulation;
+// UI setup and interaction systems.
 mod ui;
 
 use crate::model::Simulation;
 
+// Entry point: wire plugins, resources, startup systems, and frame systems.
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 
 use crate::model::FlyCamera;
 
+/// Spawns the 3D camera with initial transform and movement settings.
 pub fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
@@ -14,6 +15,7 @@ pub fn setup_camera(mut commands: Commands) {
     ));
 }
 
+/// Updates fly camera movement from keyboard and mouse input.
 pub fn camera_movement(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -21,10 +23,12 @@ pub fn camera_movement(
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut query: Query<(&mut Transform, &FlyCamera)>,
 ) {
+    // This project expects exactly one fly camera.
     let Ok((mut transform, settings)) = query.single_mut() else {
         return;
     };
 
+    // Build movement direction from currently pressed keys.
     let mut direction = Vec3::ZERO;
 
     if keyboard.pressed(KeyCode::KeyW) {
@@ -50,6 +54,7 @@ pub fn camera_movement(
         transform.translation += direction.normalize() * settings.speed * time.delta_secs();
     }
 
+    // Rotate only while right mouse button is held.
     if mouse_buttons.pressed(MouseButton::Right) {
         for ev in mouse_motion.read() {
             let yaw = Quat::from_rotation_y(-ev.delta.x * settings.sensitivity * 0.01);
