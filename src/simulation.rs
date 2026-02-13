@@ -1,8 +1,9 @@
 use bevy::prelude::*;
+use std::collections::HashSet;
 
 use crate::model::{
-    Event, EventType, NUM_ROBOTS, NUM_TASKS, Robot, RobotAssignment, RobotPath, Simulation, Task,
-    robot_start_position, task_position,
+    CollisionState, Event, EventType, NUM_ROBOTS, NUM_TASKS, Robot, RobotAssignment, RobotPath,
+    RobotVisualMaterials, Simulation, Task, robot_start_position, task_position,
 };
 
 /// Spawns world content: light, ground, robots, and tasks.
@@ -11,6 +12,13 @@ pub fn setup_world(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let robot_normal_material = materials.add(Color::srgb(0.2, 0.7, 0.3));
+    let robot_collision_material = materials.add(Color::srgb(1.0, 0.2, 0.1));
+    commands.insert_resource(RobotVisualMaterials {
+        normal: robot_normal_material.clone(),
+        collision: robot_collision_material,
+    });
+
     // Directional light for simple scene illumination.
     commands.spawn((
         DirectionalLight::default(),
@@ -29,13 +37,14 @@ pub fn setup_world(
         let start = robot_start_position(i);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::default())),
-            MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.3))),
+            MeshMaterial3d(robot_normal_material.clone()),
             Transform::from_translation(start),
             Robot { id: i },
             RobotAssignment::default(),
             RobotPath {
                 points: vec![start],
             },
+            CollisionState::default(),
         ));
     }
 
@@ -175,6 +184,46 @@ pub fn draw_robot_paths(mut gizmos: Gizmos, query: Query<&RobotPath>) {
             let a = segment[0] + Vec3::Y * 0.05;
             let b = segment[1] + Vec3::Y * 0.05;
             gizmos.line(a, b, Color::srgb(0.1, 0.7, 1.0));
+        }
+    }
+}
+
+/// Detects robot-robot conflicts based on a fixed distance threshold.
+pub fn detect_conflicts(mut robots: Query<(Entity, &Transform, &mut CollisionState), With<Robot>>) {
+    let robot_positions: Vec<(Entity, Vec3)> = robots
+        .iter()
+        .map(|(entity, transform, _)| (entity, transform.translation))
+        .collect();
+
+    let mut colliding_entities = HashSet::new();
+    let collision_distance_sq = 0.8_f32 * 0.8_f32;
+
+    for i in 0..robot_positions.len() {
+        for j in (i + 1)..robot_positions.len() {
+            let (a_entity, a_pos) = robot_positions[i];
+            let (b_entity, b_pos) = robot_positions[j];
+            if a_pos.distance_squared(b_pos) < collision_distance_sq {
+                colliding_entities.insert(a_entity);
+                colliding_entities.insert(b_entity);
+            }
+        }
+    }
+
+    for (entity, _, mut collision) in &mut robots {
+        collision.is_colliding = colliding_entities.contains(&entity);
+    }
+}
+
+/// Applies a highlight material to robots currently flagged as colliding.
+pub fn highlight_collisions(
+    visuals: Res<RobotVisualMaterials>,
+    mut robots: Query<(&CollisionState, &mut MeshMaterial3d<StandardMaterial>), With<Robot>>,
+) {
+    for (collision, mut material) in &mut robots {
+        if collision.is_colliding {
+            *material = MeshMaterial3d(visuals.collision.clone());
+        } else {
+            *material = MeshMaterial3d(visuals.normal.clone());
         }
     }
 }

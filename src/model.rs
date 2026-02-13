@@ -5,7 +5,7 @@ use std::collections::BinaryHeap;
 /// Number of robots spawned at startup.
 pub const NUM_ROBOTS: usize = 5;
 /// Number of tasks spawned at startup.
-pub const NUM_TASKS: usize = 12;
+pub const NUM_TASKS: usize = 15;
 
 #[derive(Component)]
 /// A robot entity participating in the simulation.
@@ -26,6 +26,13 @@ pub struct RobotAssignment {
 pub struct RobotPath {
     /// Ordered waypoints used to draw a path line in the scene.
     pub points: Vec<Vec3>,
+}
+
+#[derive(Component, Default)]
+/// Stores whether a robot is currently in a collision state.
+pub struct CollisionState {
+    /// True when the robot is within collision distance of another robot.
+    pub is_colliding: bool,
 }
 
 #[derive(Component)]
@@ -50,6 +57,15 @@ pub struct FlyCamera {
     pub speed: f32,
     /// Mouse-look sensitivity multiplier.
     pub sensitivity: f32,
+}
+
+#[derive(Resource)]
+/// Shared robot materials for normal and collision-highlighted states.
+pub struct RobotVisualMaterials {
+    /// Material shown when a robot is not colliding.
+    pub normal: Handle<StandardMaterial>,
+    /// Material shown when a robot is colliding.
+    pub collision: Handle<StandardMaterial>,
 }
 
 #[derive(Resource)]

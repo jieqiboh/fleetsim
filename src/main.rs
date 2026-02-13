@@ -28,9 +28,14 @@ fn main() {
             Update,
             (
                 camera::camera_movement,
-                simulation::run_simulation,
-                simulation::allocate_tasks,
-                simulation::draw_robot_paths,
+                (
+                    simulation::run_simulation,
+                    simulation::allocate_tasks,
+                    simulation::detect_conflicts,
+                    simulation::highlight_collisions,
+                    simulation::draw_robot_paths,
+                )
+                    .chain(),
                 ui::restart_button_system,
             ),
         )
