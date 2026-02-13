@@ -8,13 +8,38 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .insert_resource(Simulation::new())
         .add_systems(Startup, setup)
-        .add_systems(Update, (camera_movement, run_simulation))
+        .add_systems(
+            Update,
+            (
+                camera_movement,
+                run_simulation,
+                allocate_tasks,
+                draw_robot_paths,
+            ),
+        )
         .run();
 }
 
 #[derive(Component)]
 struct Robot {
     id: usize,
+}
+
+#[derive(Component, Default)]
+struct RobotAssignment {
+    task_id: Option<usize>,
+}
+
+#[derive(Component, Default)]
+struct RobotPath {
+    points: Vec<Vec3>,
+}
+
+#[derive(Component)]
+struct Task {
+    id: usize,
+    assigned_to: Option<usize>,
+    completed: bool,
 }
 
 #[derive(Component)]
@@ -71,7 +96,11 @@ impl Eq for Event {}
 
 #[derive(Debug)]
 enum EventType {
-    MoveRobot { robot_id: usize, target: Vec3 },
+    MoveRobot {
+        robot_id: usize,
+        target: Vec3,
+        task_id: Option<usize>,
+    },
 }
 
 fn pseudo_random(seed: f32) -> f32 {
@@ -85,7 +114,6 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut sim: ResMut<Simulation>,
 ) {
     // Camera
     commands.spawn((
@@ -112,21 +140,33 @@ fn setup(
 
     // Spawn robots
     for i in 0..5 {
+        let start = Vec3::new(i as f32 * 2.0 - 4.0, 0.5, 0.0);
         commands.spawn((
             Mesh3d(meshes.add(Cuboid::default())),
             MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.3))),
-            Transform::from_xyz(i as f32 * 2.0 - 4.0, 0.5, 0.0),
+            Transform::from_translation(start),
             Robot { id: i },
-        ));
-
-        // Schedule first move event
-        sim.schedule(Event {
-            timestamp: 2.0 + i as f64,
-            event_type: EventType::MoveRobot {
-                robot_id: i,
-                target: Vec3::new(0.0, 0.5, 5.0),
+            RobotAssignment::default(),
+            RobotPath {
+                points: vec![start],
             },
-        });
+        ));
+    }
+
+    // Spawn simple tasks to be allocated to robots.
+    for task_id in 0..12 {
+        let x = pseudo_random(task_id as f32 + 10.0) * 14.0 - 7.0;
+        let z = pseudo_random(task_id as f32 + 42.0) * 14.0 - 7.0;
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::default())),
+            MeshMaterial3d(materials.add(Color::srgb(0.9, 0.3, 0.2))),
+            Transform::from_xyz(x, 0.25, z).with_scale(Vec3::splat(0.3)),
+            Task {
+                id: task_id,
+                assigned_to: None,
+                completed: false,
+            },
+        ));
     }
 }
 
@@ -135,7 +175,8 @@ fn setup(
 fn run_simulation(
     time: Res<Time>,
     mut sim: ResMut<Simulation>,
-    mut query: Query<(&Robot, &mut Transform)>,
+    mut robots: Query<(&Robot, &mut Transform, &mut RobotAssignment, &mut RobotPath)>,
+    mut tasks: Query<&mut Task>,
 ) {
     // Advance simulation clock
     sim.now += time.delta_secs_f64();
@@ -148,33 +189,104 @@ fn run_simulation(
         let event = sim.events.pop().unwrap();
 
         match event.event_type {
-            EventType::MoveRobot { robot_id, target } => {
-                for (robot, mut transform) in &mut query {
+            EventType::MoveRobot {
+                robot_id,
+                target,
+                task_id,
+            } => {
+                for (robot, mut transform, mut assignment, mut path) in &mut robots {
                     if robot.id == robot_id {
+                        let from = transform.translation;
                         transform.translation = target;
+                        if path.points.last().copied() != Some(from) {
+                            path.points.push(from);
+                        }
+                        path.points.push(target);
+                        assignment.task_id = None;
                     }
                 }
 
-                // Schedule next move (looping)
-                let now = sim.now;
-                let seed = now as f32 + robot_id as f32;
-                sim.schedule(Event {
-                    timestamp: now + 3.0,
-                    event_type: EventType::MoveRobot {
-                        robot_id,
-                        target: Vec3::new(
-                            pseudo_random(seed) * 8.0 - 4.0,
-                            0.5,
-                            pseudo_random(seed + 1.2345) * 8.0 - 4.0,
-                        ),
-                    },
-                });
+                if let Some(task_id) = task_id {
+                    for mut task in &mut tasks {
+                        if task.id == task_id {
+                            task.completed = true;
+                            task.assigned_to = None;
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-// ---------- CAMERA SYSTEM (UNCHANGED) ----------
+fn allocate_tasks(
+    mut sim: ResMut<Simulation>,
+    mut robots: Query<(Entity, &Robot, &Transform, &mut RobotAssignment)>,
+    mut tasks: Query<(Entity, &mut Task, &Transform)>,
+) {
+    let now = sim.now;
+    for (_, robot, transform, mut assignment) in &mut robots {
+        if assignment.task_id.is_some() {
+            continue;
+        }
+
+        let mut best_task_entity = None;
+        let mut best_task_id = 0usize;
+        let mut best_task_pos = Vec3::ZERO;
+        let mut best_dist_sq = f32::MAX;
+
+        for (task_entity, task, task_transform) in &mut tasks {
+            if task.completed || task.assigned_to.is_some() {
+                continue;
+            }
+
+            let task_pos = task_transform.translation;
+            let dist_sq = transform.translation.distance_squared(task_pos);
+            if dist_sq < best_dist_sq {
+                best_dist_sq = dist_sq;
+                best_task_entity = Some(task_entity);
+                best_task_id = task.id;
+                best_task_pos = task_pos;
+            }
+        }
+
+        let Some(task_entity) = best_task_entity else {
+            continue;
+        };
+
+        assignment.task_id = Some(best_task_id);
+        if let Ok((_, mut task, _)) = tasks.get_mut(task_entity) {
+            task.assigned_to = Some(robot.id);
+        }
+
+        let travel_time = (best_dist_sq.sqrt() / 4.0).max(0.5) as f64;
+        sim.schedule(Event {
+            timestamp: now + travel_time,
+            event_type: EventType::MoveRobot {
+                robot_id: robot.id,
+                target: Vec3::new(best_task_pos.x, 0.5, best_task_pos.z),
+                task_id: Some(best_task_id),
+            },
+        });
+    }
+}
+
+fn draw_robot_paths(mut gizmos: Gizmos, query: Query<&RobotPath>) {
+    for path in &query {
+        if path.points.len() < 2 {
+            continue;
+        }
+
+        for segment in path.points.windows(2) {
+            let a = segment[0] + Vec3::Y * 0.05;
+            let b = segment[1] + Vec3::Y * 0.05;
+            gizmos.line(a, b, Color::srgb(0.1, 0.7, 1.0));
+        }
+    }
+}
+
+// ---------- CAMERA SYSTEM ----------
 
 fn camera_movement(
     time: Res<Time>,
