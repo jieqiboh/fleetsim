@@ -33,3 +33,8 @@ cargo run
 - `src/camera.rs`: camera setup and controls
 - `src/simulation.rs`: world setup and simulation systems
 - `src/ui.rs`: UI setup and restart button behavior
+
+## To do:
+- Update UI to easily vary simulation parameters.
+- Add simulation controls: pause, step, speed multiplier, seed control, scenario presets.
+- Visual polish: labels for robot/task IDs, task state colors, and collision heatmap/trails.
