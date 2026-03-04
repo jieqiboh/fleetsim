@@ -7,6 +7,8 @@ A 3D multi-robot warehouse simulation platform built in Rust + Bevy, focused on:
 
 Designed as a portfolio piece aligned with robotics software, simulation, and game/graphics engineering roles.
 
+<img src="assets/screenshot.png" alt="FleetSim screenshot" width="600"/>
+
 ## Run
 ```bash
 cargo run
