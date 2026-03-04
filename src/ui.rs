@@ -1,11 +1,19 @@
 use bevy::prelude::*;
 
 use crate::model::{
-    RestartButton, Robot, RobotAssignment, RobotPath, Simulation, Task, robot_start_position,
-    task_position,
+    ActiveScenario, Robot, RobotVisualMaterials, ScenarioConfig, Scenario, Simulation, Task,
 };
+use crate::simulation::spawn_scenario;
 
-/// Spawns the overlay UI camera and a restart button.
+/// Marker for the restart button.
+#[derive(Component)]
+pub struct RestartButton;
+
+/// Marks a button that switches to a specific scenario.
+#[derive(Component)]
+pub struct ScenarioButton(pub Scenario);
+
+/// Spawns the overlay UI camera and the button row.
 pub fn setup_restart_ui(mut commands: Commands) {
     // Render UI after the 3D camera pass.
     commands.spawn((
@@ -17,64 +25,165 @@ pub fn setup_restart_ui(mut commands: Commands) {
         },
     ));
 
+    // Horizontal row container in the top-left corner.
     commands
         .spawn((
-            // Absolute-positioned container in the top-left corner.
             Node {
                 position_type: PositionType::Absolute,
                 top: px(12.0),
                 left: px(12.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: px(8.0),
                 ..default()
             },
             BackgroundColor(Color::NONE),
         ))
         .with_children(|parent| {
-            parent
-                .spawn((
-                    Button,
-                    RestartButton,
-                    // Basic button sizing and label alignment.
-                    Node {
-                        min_width: px(170.0),
-                        min_height: px(36.0),
-                        padding: UiRect::axes(px(12.0), px(8.0)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.18, 0.45, 0.85)),
-                    ZIndex(10),
-                ))
-                .with_children(|button| {
-                    button.spawn((
-                        // Visible button label.
-                        Text::new("Restart Simulation"),
-                        TextFont {
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
+            spawn_scenario_button(parent, "Small", Scenario::Small);
+            spawn_scenario_button(parent, "Warehouse", Scenario::Warehouse);
+            spawn_scenario_button(parent, "Stress Test", Scenario::StressTest);
+            spawn_restart_button(parent);
         });
 }
 
-/// Handles restart button interaction and resets simulation state when pressed.
+fn spawn_scenario_button(parent: &mut ChildSpawnerCommands, label: &str, scenario: Scenario) {
+    parent
+        .spawn((
+            Button,
+            ScenarioButton(scenario),
+            Node {
+                min_height: px(36.0),
+                padding: UiRect::axes(px(12.0), px(8.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.25, 0.25, 0.25)),
+            ZIndex(10),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(label),
+                TextFont { font_size: 16.0, ..default() },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+fn spawn_restart_button(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Button,
+            RestartButton,
+            Node {
+                min_width: px(170.0),
+                min_height: px(36.0),
+                padding: UiRect::axes(px(12.0), px(8.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.18, 0.45, 0.85)),
+            ZIndex(10),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("Restart Simulation"),
+                TextFont { font_size: 16.0, ..default() },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+/// Despawns all robots and tasks, then respawns from `config`.
+#[allow(clippy::too_many_arguments)]
+fn reset_simulation(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    sim: &mut Simulation,
+    visuals: &RobotVisualMaterials,
+    robot_entities: &[Entity],
+    task_entities: &[Entity],
+    config: &ScenarioConfig,
+) {
+    for &e in robot_entities.iter().chain(task_entities) {
+        commands.entity(e).despawn();
+    }
+    sim.now = 0.0;
+    sim.events.clear();
+    spawn_scenario(commands, meshes, materials, visuals, config);
+}
+
+/// Switches to a new scenario when a scenario button is pressed.
+#[allow(clippy::too_many_arguments)]
+pub fn scenario_button_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    visuals: Res<RobotVisualMaterials>,
+    mut active: ResMut<ActiveScenario>,
+    mut sim: ResMut<Simulation>,
+    mut button_query: Query<
+        (&Interaction, &mut BackgroundColor, &ScenarioButton),
+        Changed<Interaction>,
+    >,
+    robot_entities: Query<Entity, With<Robot>>,
+    task_entities: Query<Entity, With<Task>>,
+) {
+    let mut new_scenario = None;
+
+    for (interaction, mut color, scenario_btn) in &mut button_query {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = BackgroundColor(Color::srgb(0.15, 0.15, 0.15));
+                new_scenario = Some(scenario_btn.0);
+            }
+            Interaction::Hovered => {
+                *color = BackgroundColor(Color::srgb(0.35, 0.35, 0.35));
+            }
+            Interaction::None => {
+                *color = BackgroundColor(Color::srgb(0.25, 0.25, 0.25));
+            }
+        }
+    }
+
+    let Some(scenario) = new_scenario else { return };
+    active.0 = scenario;
+
+    let robots: Vec<Entity> = robot_entities.iter().collect();
+    let tasks: Vec<Entity> = task_entities.iter().collect();
+    let config = ScenarioConfig::build(scenario);
+    reset_simulation(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut sim,
+        &visuals,
+        &robots,
+        &tasks,
+        &config,
+    );
+}
+
+/// Restarts the current scenario when the restart button is pressed.
+#[allow(clippy::too_many_arguments)]
 pub fn restart_button_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    visuals: Res<RobotVisualMaterials>,
+    active: Res<ActiveScenario>,
     mut sim: ResMut<Simulation>,
     mut button_query: Query<
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<RestartButton>),
     >,
-    mut robots: Query<
-        (&Robot, &mut Transform, &mut RobotAssignment, &mut RobotPath),
-        (With<Robot>, Without<Task>),
-    >,
-    mut tasks: Query<(&mut Task, &mut Transform), (With<Task>, Without<Robot>)>,
+    robot_entities: Query<Entity, With<Robot>>,
+    task_entities: Query<Entity, With<Task>>,
 ) {
     let mut should_restart = false;
 
-    // Update button colors by interaction state and detect click.
     for (interaction, mut color) in &mut button_query {
         match *interaction {
             Interaction::Pressed => {
@@ -90,27 +199,19 @@ pub fn restart_button_system(
         }
     }
 
-    if !should_restart {
-        return;
-    }
+    if !should_restart { return; }
 
-    // Reset simulation timeline and clear pending events.
-    sim.now = 0.0;
-    sim.events.clear();
-
-    // Reset robots to initial position and clear assignments/path history.
-    for (robot, mut transform, mut assignment, mut path) in &mut robots {
-        let start = robot_start_position(robot.id);
-        transform.translation = start;
-        assignment.task_id = None;
-        path.points.clear();
-        path.points.push(start);
-    }
-
-    // Reset task state and deterministic positions.
-    for (mut task, mut transform) in &mut tasks {
-        task.assigned_to = None;
-        task.completed = false;
-        transform.translation = task_position(task.id);
-    }
+    let robots: Vec<Entity> = robot_entities.iter().collect();
+    let tasks: Vec<Entity> = task_entities.iter().collect();
+    let config = ScenarioConfig::build(active.0);
+    reset_simulation(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut sim,
+        &visuals,
+        &robots,
+        &tasks,
+        &config,
+    );
 }

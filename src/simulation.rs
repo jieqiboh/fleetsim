@@ -2,22 +2,58 @@ use bevy::prelude::*;
 use std::collections::HashSet;
 
 use crate::model::{
-    CollisionState, Event, EventType, NUM_ROBOTS, NUM_TASKS, Robot, RobotAssignment, RobotPath,
-    RobotVisualMaterials, Simulation, Task, robot_start_position, task_position,
+    ActiveScenario, CollisionState, Event, EventType, Robot, RobotAssignment, RobotPath,
+    RobotVisualMaterials, ScenarioConfig, Simulation, Task,
 };
+
+/// Spawns robots and tasks from a resolved `ScenarioConfig`.
+pub fn spawn_scenario(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    visuals: &RobotVisualMaterials,
+    config: &ScenarioConfig,
+) {
+    for (id, &pos) in config.robot_positions.iter().enumerate() {
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::default())),
+            MeshMaterial3d(visuals.normal.clone()),
+            Transform::from_translation(pos),
+            Robot { id },
+            RobotAssignment::default(),
+            RobotPath { points: vec![pos] },
+            CollisionState::default(),
+        ));
+    }
+
+    for (id, &pos) in config.task_positions.iter().enumerate() {
+        commands.spawn((
+            Mesh3d(meshes.add(Cuboid::default())),
+            MeshMaterial3d(materials.add(Color::srgb(0.9, 0.3, 0.2))),
+            Transform::from_translation(pos).with_scale(Vec3::splat(0.3)),
+            Task {
+                id,
+                assigned_to: None,
+                completed: false,
+            },
+        ));
+    }
+}
 
 /// Spawns world content: light, ground, robots, and tasks.
 pub fn setup_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    active: Res<ActiveScenario>,
 ) {
     let robot_normal_material = materials.add(Color::srgb(0.2, 0.7, 0.3));
     let robot_collision_material = materials.add(Color::srgb(1.0, 0.2, 0.1));
-    commands.insert_resource(RobotVisualMaterials {
-        normal: robot_normal_material.clone(),
+    let visuals = RobotVisualMaterials {
+        normal: robot_normal_material,
         collision: robot_collision_material,
-    });
+    };
+    commands.insert_resource(visuals.clone());
 
     // Directional light for simple scene illumination.
     commands.spawn((
@@ -32,36 +68,8 @@ pub fn setup_world(
         Transform::from_scale(Vec3::splat(20.0)),
     ));
 
-    // Spawn robots at deterministic start positions.
-    for i in 0..NUM_ROBOTS {
-        let start = robot_start_position(i);
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::default())),
-            MeshMaterial3d(robot_normal_material.clone()),
-            Transform::from_translation(start),
-            Robot { id: i },
-            RobotAssignment::default(),
-            RobotPath {
-                points: vec![start],
-            },
-            CollisionState::default(),
-        ));
-    }
-
-    // Spawn deterministic task markers.
-    for task_id in 0..NUM_TASKS {
-        let pos = task_position(task_id);
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::default())),
-            MeshMaterial3d(materials.add(Color::srgb(0.9, 0.3, 0.2))),
-            Transform::from_translation(pos).with_scale(Vec3::splat(0.3)),
-            Task {
-                id: task_id,
-                assigned_to: None,
-                completed: false,
-            },
-        ));
-    }
+    let config = ScenarioConfig::build(active.0);
+    spawn_scenario(&mut commands, &mut meshes, &mut materials, &visuals, &config);
 }
 
 /// Advances simulation time and executes due events.

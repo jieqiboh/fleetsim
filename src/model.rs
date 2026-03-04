@@ -2,10 +2,63 @@ use bevy::prelude::*;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-/// Number of robots spawned at startup.
-pub const NUM_ROBOTS: usize = 5;
-/// Number of tasks spawned at startup.
-pub const NUM_TASKS: usize = 15;
+/// The available simulation presets.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Scenario {
+    Small,
+    Warehouse,
+    StressTest,
+}
+
+/// Resolved spawn data for a scenario: robot and task world positions.
+pub struct ScenarioConfig {
+    pub robot_positions: Vec<Vec3>,
+    pub task_positions: Vec<Vec3>,
+}
+
+impl ScenarioConfig {
+    pub fn build(scenario: Scenario) -> Self {
+        match scenario {
+            Scenario::Small => Self {
+                robot_positions: (0..3).map(robot_start_position).collect(),
+                task_positions: (0..8).map(task_position).collect(),
+            },
+            Scenario::Warehouse => {
+                // 5 robots evenly spaced in a row at the bottom edge.
+                let robot_positions = (0..5)
+                    .map(|i| Vec3::new(i as f32 * 3.0 - 6.0, 0.5, -6.0))
+                    .collect();
+                // 25 tasks in a 5-column × 5-row grid centred on the arena.
+                let task_positions = (0..25)
+                    .map(|i| {
+                        let col = (i % 5) as f32;
+                        let row = (i / 5) as f32;
+                        Vec3::new(col * 3.0 - 6.0, 0.25, row * 2.5 - 5.0)
+                    })
+                    .collect();
+                Self { robot_positions, task_positions }
+            }
+            Scenario::StressTest => {
+                // 10 robots in two rows of 5, well within the plane bounds (-10..10).
+                let robot_positions = (0..10)
+                    .map(|i| {
+                        let col = (i % 5) as f32;
+                        let row = (i / 5) as f32;
+                        Vec3::new(col * 4.0 - 8.0, 0.5, row * 2.0 + 7.0)
+                    })
+                    .collect();
+                Self {
+                    robot_positions,
+                    task_positions: (0..30).map(task_position).collect(),
+                }
+            }
+        }
+    }
+}
+
+/// Active scenario resource — determines which preset is currently loaded.
+#[derive(Resource)]
+pub struct ActiveScenario(pub Scenario);
 
 #[derive(Component)]
 /// A robot entity participating in the simulation.
@@ -47,10 +100,6 @@ pub struct Task {
 }
 
 #[derive(Component)]
-/// Marker component for the UI restart button entity.
-pub struct RestartButton;
-
-#[derive(Component)]
 /// Runtime movement settings for the free-fly camera.
 pub struct FlyCamera {
     /// Camera translation speed in world units per second.
@@ -59,7 +108,7 @@ pub struct FlyCamera {
     pub sensitivity: f32,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 /// Shared robot materials for normal and collision-highlighted states.
 pub struct RobotVisualMaterials {
     /// Material shown when a robot is not colliding.
@@ -104,7 +153,7 @@ pub struct Event {
 impl Ord for Event {
     /// Reverses sort order so the smallest timestamp is popped first.
     fn cmp(&self, other: &Self) -> Ordering {
-        other.timestamp.partial_cmp(&self.timestamp).unwrap()
+        other.timestamp.partial_cmp(&self.timestamp).unwrap_or(Ordering::Equal)
     }
 }
 
@@ -137,18 +186,18 @@ pub enum EventType {
 }
 
 /// Lightweight deterministic pseudo-random helper used for task placement.
-pub fn pseudo_random(seed: f32) -> f32 {
+fn pseudo_random(seed: f32) -> f32 {
     let x = (seed * 12.9898).sin() * 43_758.547;
     x - x.floor()
 }
 
 /// Returns the deterministic start position for a robot id.
-pub fn robot_start_position(robot_id: usize) -> Vec3 {
+fn robot_start_position(robot_id: usize) -> Vec3 {
     Vec3::new(robot_id as f32 * 2.0 - 4.0, 0.5, 0.0)
 }
 
 /// Returns the deterministic world position for a task id.
-pub fn task_position(task_id: usize) -> Vec3 {
+fn task_position(task_id: usize) -> Vec3 {
     Vec3::new(
         pseudo_random(task_id as f32 + 10.0) * 14.0 - 7.0,
         0.25,

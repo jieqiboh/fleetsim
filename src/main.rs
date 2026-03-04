@@ -9,13 +9,14 @@ mod simulation;
 // UI setup and interaction systems.
 mod ui;
 
-use crate::model::Simulation;
+use crate::model::{ActiveScenario, Scenario, Simulation};
 
 // Entry point: wire plugins, resources, startup systems, and frame systems.
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(Simulation::new())
+        .insert_resource(ActiveScenario(Scenario::Warehouse))
         .add_systems(
             Startup,
             (
@@ -36,6 +37,7 @@ fn main() {
                     simulation::draw_robot_paths,
                 )
                     .chain(),
+                ui::scenario_button_system,
                 ui::restart_button_system,
             ),
         )
